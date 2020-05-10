@@ -22,6 +22,8 @@
 #define CNFG_IMPLEMENTATION
 #include "CNFG.h"
 
+void FlushRender();
+
 #define printf( x...) LOGI( x )
 
 unsigned frames = 0;
@@ -39,7 +41,7 @@ int lastkey, lastkeydown;
 
 static int keyboard_up;
 
-
+int mousedown;
 int colormode;
 double colormodechangetime;
 
@@ -59,6 +61,7 @@ void HandleButton( int x, int y, int button, int bDown )
 
 	if( bDown )  { colormode = (colormode+1)%2; }
 	if( !bDown ) { colormodechangetime = OGGetAbsoluteTime(); }
+	mousedown = bDown;
 //	if( bDown ) { keyboard_up = !keyboard_up; AndroidDisplayKeyboard( keyboard_up ); }
 }
 
@@ -71,6 +74,7 @@ void HandleMotion( int x, int y, int mask )
 
 extern struct android_app * gapp;
 
+void FailUSB();
 void RequestPermissionOrGetConnectionFD();
 
 jobject deviceConnection = 0;
@@ -97,10 +101,26 @@ void HandleResume()
 #define NUM_LEDS 20
 uint8_t Colorbuf[NUM_LEDS*4];
 
-char assettext[8192];
+char rettext[512];
+char assettext[512];
 char * ats = assettext;
 
+int pixelhueX = -1, pixelhueY = -1;
+
 unsigned long HSVtoHEX( float hue, float sat, float value );
+unsigned long PixelHue( int x, int y )
+{
+	float sat = (pixelhueY-y) / (float)pixelhueY * 2.0;
+	float hue = x / (float)pixelhueX;
+	if( sat < 1.0 )
+	{
+		return HSVtoHEX( x * 0.0012, (sat<1)?sat:1, 1.0 );
+	}
+	else
+	{
+		return HSVtoHEX( x * 0.0012, (sat<1)?sat:1, 2.0-sat );
+	}
+}
 
 int main()
 {
@@ -110,12 +130,15 @@ int main()
 	double LastFrameTime = OGGetAbsoluteTime();
 	double SecToWait;
 	int linesegs = 0;
+	uint32_t * pixelHueBackdrop = 0;
 
 	CNFGBGColor = 0x400000;
 	CNFGDialogColor = 0x444444;
 	CNFGSetup( "Test Bench", 0, 0 );
 
 	RequestPermissionOrGetConnectionFD();
+
+	//To make text look boldish
 
 	while(1)
 	{
@@ -129,20 +152,40 @@ int main()
 		if( suspended ) { usleep(50000); continue; }
 
 		CNFGClearFrame();
-		CNFGColor( 0xFFFFFF );
 		CNFGGetDimensions( &screenx, &screeny );
 
-		// Mesh in background
-		CNFGColor( 0xffffff );
-		CNFGPenX = 20; CNFGPenY = 900;
-		CNFGDrawText( assettext, 7 );
-		void FlushRender();
-		FlushRender();
+		if( ( screenx != pixelhueX || screeny != pixelhueY ) && screenx > 0 && screeny > 0)
+		{
+			pixelhueX = screenx;
+			pixelhueY = screeny;
+			pixelHueBackdrop = realloc( pixelHueBackdrop, pixelhueX * pixelhueY * 4 );
+			int x, y;
+			for( y = 0; y < pixelhueY; y++ )
+			for( x = 0; x < pixelhueX; x++ )
+			{
+				pixelHueBackdrop[x+y*screenx] = PixelHue( x, y );
+			}
+		}
 
-//		int lastwrite = -5;
+		if( pixelHueBackdrop && colormode == 1 && mousedown )
+		{
+			CNFGUpdateScreenWithBitmap( pixelHueBackdrop, pixelhueX, pixelhueY );
+		}
+		else
+		{
+			int led = 0;
+			for( led = 0; led < NUM_LEDS; led++ )
+			{
+				uint32_t col = ( Colorbuf[led*4+0] << 8) | ( Colorbuf[led*4+1] ) | ( Colorbuf[led*4+2] << 16);
+				CNFGColor( 0xff000000 | col );
+				int sx = (led * screenx) / (NUM_LEDS+1);
+				CNFGTackRectangle( sx, 850, sx + screenx/NUM_LEDS, 950 );
+				FlushRender();
+			}
+		}
+
 		if( deviceConnectionFD )
 		{
-
 			//This whole section does cool stuff with LEDs
 			int allledbytes = NUM_LEDS*4;
 			for( i = 0; i < allledbytes; i+=4 )
@@ -152,8 +195,7 @@ int main()
 
 				if( colormode )
 				{
-					sat = lastmousey / 1500.;
-					rk = HSVtoHEX( lastmousex * 0.0012, (sat<1)?sat:1, 1.0 );
+					rk = PixelHue( lastmousex, lastmousey );
 				}
 				else
 				{
@@ -189,34 +231,70 @@ int main()
 				if( byrem == 0 ) sendbuf[0] |= 0x80;
 				int tsend = 65; //Size of payload (must be 64+1 always)
 
-
+				//Ok this looks weird, because Android has a bulkTransfer function, but that has a TON of layers of misdirection before it just calls the ioctl.
 				struct usbdevfs_bulktransfer  ctrl;
 				memset(&ctrl, 0, sizeof(ctrl));
-				ctrl.ep = /*epnum*/0x02;
+				ctrl.ep = 0x02; //Endpoint 0x02 is output endpoint.
 				ctrl.len = 64;
 				ctrl.data = sendbuf;
 				ctrl.timeout = 100;
 				lastFDWrite = ioctl(deviceConnectionFD, USBDEVFS_BULK, &ctrl);
-				if( lastFDWrite < 0 ) deviceConnectionFD = 0;
-			//	res = hid_send_feature_report( handle, sendbuf, tsend);	//Method 1 control transfer (janky on STM32F0)
-			//	res = hid_write(handle, sendbuf+1, tsend = 64 );
-				//printf( "RES: %d\n", res );
+				if( lastFDWrite < 0 )
+				{
+					FailUSB();
+					break;
+				}
+			}
 
-				usleep(1000);
-				//if( res != tsend ) TXFaults++;
+			{
+				char * rxprintf = rettext;
+				uint8_t RXbuf[64];
+				//Also read-back the properties.
+				struct usbdevfs_bulktransfer  ctrl;
+				memset(&ctrl, 0, sizeof(ctrl));
+				ctrl.ep = 0x81; //Endpoint 0x81 is input endpoint.
+				ctrl.len = 64;
+				ctrl.data = RXbuf;
+				ctrl.timeout = 100;
+				int lastfdread = ioctl(deviceConnectionFD, USBDEVFS_BULK, &ctrl);
+				rxprintf += sprintf( rxprintf, "RX: %d\n", lastfdread );
+				if( lastfdread == 64 )
+				{
+					int temperature = RXbuf[4] | (RXbuf[5]<<8);
+					int adc = RXbuf[6] | (RXbuf[7]<<8);
+					int voltage = RXbuf[8] | (RXbuf[9]<<8);
+					rxprintf += sprintf( rxprintf, "T: %d  ADC: %d V: %d\n", temperature, adc, voltage );	
+
+					int t;
+					CNFGColor( 0xffffffff );
+					for( t = 0; t < 3; t++ )
+					{
+						CNFGTackSegment( t * screenx / 4, RXbuf[20+t] * 50 + 1100, (t+1)*screenx/4, RXbuf[20+t] * 50 + 1100 );
+					}
+				}
 			}
 		}
+
 
 		if( deviceConnectionFD == 0 )
 		{
 			RequestPermissionOrGetConnectionFD();
 		}
 
-		CNFGPenX = 20; CNFGPenY = 480;
-		char st[50];
-		sprintf( st, "%dx%d %d %d %d %d - %d %d - %d", screenx, screeny, lastmousex, lastmousey, lastkey, lastkeydown, lastbid, lastmask, lastFDWrite );
-		CNFGDrawText( st, 7 );
-		glLineWidth( 2.0 );
+		CNFGPenX = 20; CNFGPenY = 200;
+		char st[2048];
+		sprintf( st, "%dx%d %d %d %d %d - %d %d - %d\n%s\n%s", screenx, screeny, lastmousex, lastmousey, lastkey, lastkeydown, lastbid, lastmask, lastFDWrite, assettext, rettext );
+
+		CNFGColor( 0xff000000 );
+		glLineWidth( 20.0f );
+		CNFGDrawText( st, 10 );
+		FlushRender();
+
+		CNFGColor( 0xFFFFFFFF );
+		glLineWidth( 2.0f );
+		CNFGDrawText( st, 10 );
+		FlushRender();
+
 
 		// Square behind text
 
@@ -319,11 +397,24 @@ unsigned long HSVtoHEX( float hue, float sat, float value )
 
 
 
-
+double dTimeOfUSBFail;
+double dTimeOfLastAsk;
+void FailUSB()
+{
+	deviceConnectionFD = 0;
+	dTimeOfUSBFail = OGGetAbsoluteTime();
+}
 
 void RequestPermissionOrGetConnectionFD()
 {
 	ats = assettext; //reset printf
+
+	//Don't permit 
+	if( OGGetAbsoluteTime() - dTimeOfUSBFail < 1 ) 
+	{
+		ats+=sprintf(ats, "Comms failed.  Waiting to reconnect." );
+		return;
+	}
 
 	struct android_app* app = gapp;
 	const struct JNINativeInterface * env = 0;
@@ -397,7 +488,7 @@ void RequestPermissionOrGetConnectionFD()
 		uint16_t productId = env->CallIntMethod( envptr, device, MethodgetProductId );
 		int ifaceCount = env->CallIntMethod( envptr, device, MethodgetInterfaceCount );
 		const char *strdevname = env->GetStringUTFChars(envptr, env->CallObjectMethod( envptr, device, MethodgetDeviceName ), 0);
-		ats+=sprintf(ats, "DEV:%s,%04x:%04x Ct: %d\n", strdevname,
+		ats+=sprintf(ats, "%s,%04x:%04x(%d)\n", strdevname,
 			vendorId,
 			productId, ifaceCount );
 
@@ -456,7 +547,11 @@ void RequestPermissionOrGetConnectionFD()
 		{
 			// 	hasPermission(UsbDevice device) 
 
-			if( env->CallBooleanMethod( envptr, manager, MethodhasPermission, matchingDevice ) )
+			if( OGGetAbsoluteTime() - dTimeOfLastAsk < 5 )
+			{
+				ats+=sprintf(ats, "Asked for permission.  Waiting to ask again." );
+			}
+			else if( env->CallBooleanMethod( envptr, manager, MethodhasPermission, matchingDevice ) )
 			{
 				ats+=sprintf(ats, "Has permission - disconnected?" );
 			}
@@ -481,6 +576,7 @@ void RequestPermissionOrGetConnectionFD()
 
 				//This actually requests permission.
 				env->CallVoidMethod( envptr, manager, MethodrequestPermission, matchingDevice, pi );
+				dTimeOfLastAsk = OGGetAbsoluteTime();
 			}
 		}
 		else
