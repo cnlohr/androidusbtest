@@ -244,6 +244,7 @@ int main()
 					FailUSB();
 					break;
 				}
+				usleep(1000); 
 			}
 
 			{
