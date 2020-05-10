@@ -167,6 +167,33 @@ int main()
 			}
 		}
 
+		//This whole section does cool stuff with LEDs
+		int allledbytes = NUM_LEDS*4;
+		for( i = 0; i < allledbytes; i+=4 )
+		{
+			uint32_t rk;
+			float sat = (OGGetAbsoluteTime() - colormodechangetime)*3.0;
+
+			if( colormode )
+			{
+				rk = PixelHue( lastmousex, lastmousey );
+			}
+			else
+			{
+				rk = HSVtoHEX( i * 0.012+ iframeno* .01, (sat<1)?sat:1, 1.0 );
+			}
+
+			int white = (int)((1.-sat) * 255);
+			if( white > 255 ) white = 255;
+			if( white < 0 ) white = 0;
+
+			Colorbuf[i+0] = rk>>8;
+			Colorbuf[i+1] = rk;
+			Colorbuf[i+2] = rk>>16;
+			Colorbuf[i+3] = white;
+		}
+
+
 		if( pixelHueBackdrop && colormode == 1 && mousedown )
 		{
 			CNFGUpdateScreenWithBitmap( pixelHueBackdrop, pixelhueX, pixelhueY );
@@ -178,41 +205,14 @@ int main()
 			{
 				uint32_t col = ( Colorbuf[led*4+0] << 8) | ( Colorbuf[led*4+1] ) | ( Colorbuf[led*4+2] << 16);
 				CNFGColor( 0xff000000 | col );
-				int sx = (led * screenx) / (NUM_LEDS+1);
-				CNFGTackRectangle( sx, 850, sx + screenx/NUM_LEDS, 950 );
+				int sx = (led * screenx) / (NUM_LEDS);
+				CNFGTackRectangle( sx, 850, sx + screenx/(NUM_LEDS)+1, screeny );
 				FlushRender();
 			}
 		}
 
 		if( deviceConnectionFD )
 		{
-			//This whole section does cool stuff with LEDs
-			int allledbytes = NUM_LEDS*4;
-			for( i = 0; i < allledbytes; i+=4 )
-			{
-				uint32_t rk;
-				float sat = (OGGetAbsoluteTime() - colormodechangetime)*3.0;
-
-				if( colormode )
-				{
-					rk = PixelHue( lastmousex, lastmousey );
-				}
-				else
-				{
-					rk = HSVtoHEX( i * 0.012+ iframeno* .01, (sat<1)?sat:1, 1.0 );
-				}
-
-				int white = (int)((1.-sat) * 255);
-				if( white > 255 ) white = 255;
-				if( white < 0 ) white = 0;
-
-				Colorbuf[i+0] = rk>>8;
-				Colorbuf[i+1] = rk;
-				Colorbuf[i+2] = rk>>16;
-				Colorbuf[i+3] = white;
-			}
-				//96..111 = brighter.
-
 			//This section does the crazy wacky stuff to actually split the LEDs into HID Packets and get them out the door... Carefully.
 			int byrem = allledbytes;
 			int offset = 0;
@@ -269,7 +269,7 @@ int main()
 					CNFGColor( 0xffffffff );
 					for( t = 0; t < 3; t++ )
 					{
-						CNFGTackSegment( t * screenx / 4, RXbuf[20+t] * 50 + 1100, (t+1)*screenx/4, RXbuf[20+t] * 50 + 1100 );
+						CNFGTackSegment( t * screenx / 3, RXbuf[20+t] * 50 + 1100, (t+1)*screenx/3, RXbuf[20+t] * 50 + 1100 );
 					}
 				}
 			}
