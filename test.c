@@ -99,7 +99,6 @@ uint8_t Colorbuf[NUM_LEDS*4];
 
 char rettext[512];
 char assettext[512];
-char * ats = assettext;
 
 int pixelhueX = -1, pixelhueY = -1;
 
@@ -131,8 +130,6 @@ int main()
 	CNFGBGColor = 0x400000;
 	CNFGDialogColor = 0x444444;
 	CNFGSetup( "Test Bench", 0, 0 );
-
-	RequestPermissionOrGetConnectionFD();
 
 	//To make text look boldish
 
@@ -275,7 +272,7 @@ int main()
 
 		if( deviceConnectionFD == 0 )
 		{
-			RequestPermissionOrGetConnectionFD();
+			RequestPermissionOrGetConnectionFD( assettext, 0xabcd, 0xf410 );
 		}
 
 		CNFGPenX = 20; CNFGPenY = 200;
