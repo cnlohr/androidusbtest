@@ -23,7 +23,7 @@
 #define CNFG_IMPLEMENTATION
 #include "CNFG.h"
 
-void FlushRender();
+void CNFGFlushRender();
 
 #define printf( x...) LOGI( x )
 
@@ -200,7 +200,7 @@ int main()
 				CNFGColor( 0xff000000 | col );
 				int sx = (led * screenx) / (NUM_LEDS);
 				CNFGTackRectangle( sx, 850, sx + screenx/(NUM_LEDS)+1, screeny );
-				FlushRender();
+				CNFGFlushRender();
 			}
 		}
 
@@ -282,12 +282,12 @@ int main()
 		CNFGColor( 0xff000000 );
 		glLineWidth( 20.0f );
 		CNFGDrawText( st, 10 );
-		FlushRender();
+		CNFGFlushRender();
 
 		CNFGColor( 0xFFFFFFFF );
 		glLineWidth( 2.0f );
 		CNFGDrawText( st, 10 );
-		FlushRender();
+		CNFGFlushRender();
 
 
 		// Square behind text
