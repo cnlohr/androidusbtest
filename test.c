@@ -25,7 +25,7 @@
 
 void CNFGFlushRender();
 
-#define printf( x...) LOGI( x )
+//#define printf( x...) LOGI( x )
 
 unsigned frames = 0;
 unsigned long iframeno = 0;
@@ -272,7 +272,7 @@ int main()
 
 		if( deviceConnectionFD == 0 )
 		{
-			RequestPermissionOrGetConnectionFD( assettext, 0xabcd, 0xf410 );
+			RequestPermissionOrGetConnectionFD( assettext, 0x1209, 0xd003 );
 		}
 
 		CNFGPenX = 20; CNFGPenY = 200;
