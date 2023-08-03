@@ -13,7 +13,7 @@
 #include <android_native_app_glue.h>
 #include <android/log.h>
 #include <android/sensor.h>
-
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <linux/usbdevice_fs.h>
 #include <asm/byteorder.h>
@@ -94,6 +94,7 @@ void HandleResume()
 }
 
 
+#define CNFGRGB( x ) ({ uint32_t v = x; (v<<24)|((v&0xff00) << 8 ) | ((v&0xff0000)>>8) | (v>>24); })
 #define NUM_LEDS 20
 uint8_t Colorbuf[NUM_LEDS*4];
 
@@ -127,9 +128,10 @@ int main()
 	int linesegs = 0;
 	uint32_t * pixelHueBackdrop = 0;
 
-	CNFGBGColor = 0x400000;
+	CNFGBGColor = 0x000040ff;
 	CNFGDialogColor = 0x444444;
 	CNFGSetup( "Test Bench", 0, 0 );
+	sprintf( rettext, "No connection." );
 
 	//To make text look boldish
 
@@ -156,7 +158,7 @@ int main()
 			for( y = 0; y < pixelhueY; y++ )
 			for( x = 0; x < pixelhueX; x++ )
 			{
-				pixelHueBackdrop[x+y*screenx] = PixelHue( x, y );
+				pixelHueBackdrop[x+y*screenx] = CNFGRGB( PixelHue( x, y ) | 0xff000000 );
 			}
 		}
 
@@ -196,16 +198,61 @@ int main()
 			int led = 0;
 			for( led = 0; led < NUM_LEDS; led++ )
 			{
-				uint32_t col = ( Colorbuf[led*4+0] << 8) | ( Colorbuf[led*4+1] ) | ( Colorbuf[led*4+2] << 16);
-				CNFGColor( 0xff000000 | col );
+				uint32_t col = ( Colorbuf[led*4+0] << 8) | ( Colorbuf[led*4+1] << 16 ) | ( Colorbuf[led*4+2] << 0);
+				CNFGColor( 0x000000ff | (col<<8) );
 				int sx = (led * screenx) / (NUM_LEDS);
-				CNFGTackRectangle( sx, 850, sx + screenx/(NUM_LEDS)+1, screeny );
+				CNFGTackRectangle( sx, 550, sx + screenx/(NUM_LEDS)+1, screeny );
 				CNFGFlushRender();
 			}
 		}
 
 		if( deviceConnectionFD )
 		{
+		
+			char * rxprintf = rettext;
+
+			// Doing HID reports...
+				
+			uint8_t buffer0[255] = { 0 }; // NOTE: This must be ONE MORE THAN what is in the hid descriptor.
+			int len = sizeof( buffer0 );
+			int j, i, r;
+
+			buffer0[0] = 0xaa; // First byte must match the ID.
+			buffer0[1] = 0xa4;
+		
+			
+			// But we can fill in random for the rest.
+			for( i = 0; i < sizeof( buffer0 )/3-2; i++ )
+			{
+				buffer0[i*3+4] = Colorbuf[i*4+0]; // gamma8[(uint8_t)rgb];
+				buffer0[i*3+5] = Colorbuf[i*4+1]; //gamma8[(uint8_t)(rgb>>8)];
+				buffer0[i*3+6] = Colorbuf[i*4+2]; //gamma8[(uint8_t)(rgb>>16)];
+			}
+
+
+			struct usbdevfs_ctrltransfer ctrl = { 0 };
+			ctrl.bRequestType = 0x21;
+			ctrl.bRequest = 0x09; // HID_SET_FEATURE_REPORT
+			ctrl.wValue = 0;
+			ctrl.wIndex = 0;
+			ctrl.wLength = sizeof( buffer0 );
+			ctrl.data = buffer0;
+			ctrl.timeout = 100;
+			lastFDWrite = ioctl(deviceConnectionFD, USBDEVFS_CONTROL, &ctrl);	
+
+			rxprintf += sprintf( rxprintf, "R: %d / %d\n", lastFDWrite, deviceConnectionFD );
+
+			if( lastFDWrite < 0 )
+			{
+				rxprintf += sprintf( rxprintf, "EN: %d (%s)\n",  errno, strerror( errno ) );
+				DisconnectUSB();
+				deviceConnectionFD = 0;
+			}
+
+
+#if 0
+			// Bulk example using this project: https://github.com/cnlohr/stm32f042_fun/tree/master/stm32f042cXt6_demo/firmware
+			
 			//This section does the crazy wacky stuff to actually split the LEDs into HID Packets and get them out the door... Carefully.
 			int byrem = allledbytes;
 			int offset = 0;
@@ -239,9 +286,10 @@ int main()
 				}
 				usleep(1000); 
 			}
+				#endif
 
+#if 0
 			{
-				char * rxprintf = rettext;
 				uint8_t RXbuf[64];
 				//Also read-back the properties.
 				struct usbdevfs_bulktransfer  ctrl;
@@ -267,6 +315,7 @@ int main()
 					}
 				}
 			}
+#endif
 		}
 
 
@@ -275,18 +324,13 @@ int main()
 			RequestPermissionOrGetConnectionFD( assettext, 0x1209, 0xd003 );
 		}
 
-		CNFGPenX = 20; CNFGPenY = 200;
+		CNFGPenX = 20; CNFGPenY = 50;
 		char st[2048];
 		sprintf( st, "%dx%d %d %d %d %d - %d %d - %d\n%s\n%s", screenx, screeny, lastmousex, lastmousey, lastkey, lastkeydown, lastbid, lastmask, lastFDWrite, assettext, rettext );
 
-		CNFGColor( 0xff000000 );
-		glLineWidth( 20.0f );
-		CNFGDrawText( st, 10 );
-		CNFGFlushRender();
-
 		CNFGColor( 0xFFFFFFFF );
 		glLineWidth( 2.0f );
-		CNFGDrawText( st, 10 );
+		CNFGDrawText( st, 6 );
 		CNFGFlushRender();
 
 
