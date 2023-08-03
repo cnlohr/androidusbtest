@@ -4,7 +4,9 @@ This toolset uses rawdrawandroid: https://github.com/cnlohr/rawdrawandroid if yo
 
 This toolset operates as a copy-pastable demo of how to do USB in C apps on Android.  This is **not** intended as catch-all or clean demo, but rather a minimal demonstration of getting permissions, and opening up USB devices in C on Android.
 
-You can check out the hardware used for this here: https://github.com/cnlohr/tensigral_lamp
+Originally it worked with this hardware: https://github.com/cnlohr/tensigral_lamp
+
+But, now, it can be easily used with the ch32v003's [rv003usb](https://github.com/cnlohr/rv003usb) driver "demo_custom_device".
 
 ## Cutting to the chase
 
